@@ -54,40 +54,42 @@ public class Exchange {
      * @return {@code true} if the order is valid, {@code false} otherwise
      */
 	public boolean validateOrder(IOrder o) {
-		// Does ticker exist? See if the security associated with the order exists in the list of securities
-		if (__________________________ == null) {
-			System.err.println("Order validation: ticker " + ______________.getTicker() + " not supported.");
-			return (false);
-		}
-		
-		//Does the trader exist? Check to see if the trader exists 
-		if (__________________________ == null) {
-			System.err.println("Order validation: trader with ID " + _______________.getID() + " not registered with the exchange.");
-			return (false);
-		}
+	    // Does ticker exist? Get the security from the order and check its ticker
+	    Security sec = o.getSecurity();  // Get the Security associated with the order
+	    if (sec == null) {
+	        System.err.println("Order validation: ticker not supported.");
+	        return false;
+	    }
 
-		//Put in pos the position that the trader mentioned in the order has in the security mentioned in the order
-		int pos = ___________________________________;
-		//Get the balance the trader has with the exchange
-		long bal = __________________________________;
+	    // Does the trader exist? Check if the trader exists
+	    Trader t = accounts.getTraderByID(o.getTrader().getID());
+	    if (t == null) {
+	        System.err.println("Order validation: trader with ID " + o.getTrader().getID() + " not registered with the exchange.");
+	        return false;
+	    }
 
-		// Does ask trader have position at the security sufficient for a sell?
-		if ((o instanceof Ask) && (pos < o.getQuantity())) {
-			System.err.println("Order validation: seller with ID " + _________.getID() + " not enough shares of " + _________.getTicker() + ": has " + pos + " and tries to sell " + _____.getQuantity());
-			return (false);
-		}
-		
-		// Does bid trader have balance sufficient for a buy?
-		if ((o instanceof Bid) && (bal < o.getValue())) {
-			System.err.println(
-					String.format("Order validation: buyer with ID %d does not have enough balance: has $%,.2f and tries to buy for $%,.2f",
-							____________.getID(), bal/100.0,o.getValue()/100.0));
-					
-			return (false);
-		}
+	    // Get the trader's position in the security
+	    int pos = accounts.getTraderAccount(t).getPosition(sec.getTicker());
 
-		return (true);
+	    // Get the balance the trader has with the exchange
+	    long bal = accounts.getTraderAccount(t).getBalance();
+
+	    // Does ask trader have position at the security sufficient for a sell?
+	    if (o instanceof Ask && pos < o.getQuantity()) {
+	        System.err.println("Order validation: seller with ID " + t.getID() + " not enough shares of " + sec.getTicker() + ": has " + pos + " and tries to sell " + o.getQuantity());
+	        return false;
+	    }
+
+	    // Does bid trader have balance sufficient for a buy?
+	    if (o instanceof Bid && bal < o.getValue()) {
+	        System.err.println(String.format("Order validation: buyer with ID %d does not have enough balance: has $%,.2f and tries to buy for $%,.2f",
+	                t.getID(), bal / 100.0, o.getValue() / 100.0));
+	        return false;
+	    }
+
+	    return true;
 	}
+
 	
     /**
      * Submits an order to the exchange for processing.
@@ -96,67 +98,57 @@ public class Exchange {
      * @param time the timestamp of the order submission (seconds)
      */
 	public void submitOrder(IOrder o, long time) {
-		if (!validateOrder(o)){
-			return;
-		}
-		
-		OrderOutcome oOutcome;
-		
-		//This is a bid for a security
-		if (o instanceof Bid) {// Order is a bid
-			//Go to the asks half-book, see if there are matching asks (selling offers) and process them
-			oOutcome = ____________.processOrder(o, time);
-			//If the quanity of the unfulfilled order in the outcome is not zero
-			if (_____________________ > 0) {
-				//Not the entire bid order was fulfilled, add the unfulfilled part to the bid half-book 
-				_______________________________________________;
-			}
-		} else { //order is an ask
-			//Go to the bids half-book and see if there are matching bids (buying offers) and process them
-			oOutcome = ____________.processOrder(o, time);
-			//If the quanity of the unfulfilled order in the outcome is not zero
-			if (oOutcome.getUnfulfilledOrder().getQuantity() > 0) {
-				//Not the entire ask order was fulfilled, add the unfulfilled part to the ask half-book 
-				_______________________________________________;
-			}			
-		}
+	    if (!validateOrder(o)) {
+	        return;
+	    }
 
-		//Save resulting trades to the tradesLog
-		if (oOutcome.getResultingTrades() != null) {
-			tradesLog.addAll(oOutcome.getResultingTrades());
-		} else {
-			return;
-		}
-		
-		//Calculate Fees for the trades
-		for (ITrade t:oOutcome.getResultingTrades()) {
-			
-			//Update balances for Buyer
-			
-			//Get the fee that they buyer is supposed to pay
-			_______________________________________________;
-			//Apply the above fee to the account balance of the buyer 			
-			_______________________________________________;
-			//Apply the trade payment to the account balance of the buyer (they spent money)
-			_______________________________________________;
-			//Add the bought stocks to the position of the buyer
-			_______________________________________________;
-			
-			//Update balances for Seller
-			
-			//Get the fee that the seller is supposed to pay
-			_______________________________________________;
-			//Apply the above fee to the account balance of the seller
-			_______________________________________________;
-			//Apply the trade payment to the account balance of the seller (they earned money)
-			_______________________________________________;
-			//Deduct the sold stocks from the position of the seller
-			_______________________________________________;
-			
-			this.totalFees += t.getBuyerFee() + t.getSellerFee(); 
-		}
+	    OrderOutcome oOutcome;
+
+	    // This is a bid for a security
+	    if (o instanceof Bid) { // Order is a bid
+	        oOutcome = book.getAsks().processOrder(o, time); // Process the bid against asks
+	        if (oOutcome.getUnfulfilledOrder().getQuantity() > 0) {
+	            // Not the entire bid order was fulfilled, add the unfulfilled part to the bid half-book
+	            Bid unfulfilledBid = (Bid) oOutcome.getUnfulfilledOrder(); // Cast to Bid
+	            book.getBids().addOrder(unfulfilledBid);
+	        }
+	    } else { // Order is an ask
+	        oOutcome = book.getBids().processOrder(o, time); // Process the ask against bids
+	        if (oOutcome.getUnfulfilledOrder().getQuantity() > 0) {
+	            // Not the entire ask order was fulfilled, add the unfulfilled part to the ask half-book
+	            Ask unfulfilledAsk = (Ask) oOutcome.getUnfulfilledOrder(); // Cast to Ask
+	            book.getAsks().addOrder(unfulfilledAsk);
+	        }
+	    }
+
+	    // Save resulting trades to the tradesLog
+	    if (oOutcome.getResultingTrades() != null) {
+	        tradesLog.addAll(oOutcome.getResultingTrades());
+	    } else {
+	        return;
+	    }
+
+	    // Calculate Fees for the trades
+	    for (ITrade t : oOutcome.getResultingTrades()) {
+	        // Update balances for Buyer
+	        Account buyerAccount = accounts.getTraderAccount(t.getBuyer());
+	        int buyerFee = buyerAccount.getFee(t); // Apply the fee for the buyer
+	        buyerAccount.applyFee(t);  // Apply the fee to the buyer's account
+	        buyerAccount.addMoney(-t.getValue()); // Deduct the value of the trade from the buyer's balance
+	        buyerAccount.addToPosition(t.getSecurity().getTicker(), t.getQuantity());
+
+	        // Update balances for Seller
+	        Account sellerAccount = accounts.getTraderAccount(t.getSeller());
+	        int sellerFee = sellerAccount.getFee(t); // Apply the fee for the seller
+	        sellerAccount.applyFee(t);  // Apply the fee to the seller's account
+	        sellerAccount.addMoney(t.getValue()); // Add the value of the trade to the seller's balance
+	        sellerAccount.deductFromPosition(t.getSecurity().getTicker(), t.getQuantity());
+
+	        // Add the fees to total fees
+	        this.totalFees += buyerFee + sellerFee; // Ensure both buyer and seller fees are added
+	    }
 	}
-	
+
 	
 	
 	//
@@ -398,16 +390,16 @@ public class Exchange {
      * 
      * @return the {@linkplain ca.yorku.cmg.lob.security.SecurityList} object
      */
+	public Orderbook getOrderbook() {
+	    return book;
+	}
+
 	public SecurityList getSecurities() {
-		return securities;
+	    return securities;
 	}
-	
-    /**
-     * Retrieves the list of accounts managed by the exchange.
-     * 
-     * @return the {@linkplain ca.yorku.cmg.lob.exchange.AccountsList} object
-     */
+
 	public AccountsList getAccounts() {
-		return accounts;
+	    return accounts;
 	}
+
 }
